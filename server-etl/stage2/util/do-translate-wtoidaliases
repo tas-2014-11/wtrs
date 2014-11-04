@@ -1,0 +1,23 @@
+#!/bin/bash
+
+one() {
+	#<mibObj oid=".1.3.6.1.2.1.2.2.1.10" instance="ifIndex" alias="ifInOctets" type="counter"/>
+
+	in=/WT/monitor/etc/datacollection-config.xml
+
+	awk -F'"' '/mibObj/ {print $2,$6}' $in | sort -u
+}
+
+one > 0.1.txt
+
+two() {
+	ll=""
+	for i in `awk '{print $1}' 0.1.txt`
+	do
+		ll="$ll $i"
+	done
+
+	snmptranslate -Of $ll
+}
+
+two

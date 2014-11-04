@@ -1,0 +1,303 @@
+#!/usr/bin/perl
+# rrd_ipaddress|rrd_service|rrd_function|rrd_time|rrd_value
+# rrd_nodeid|rrd_oid|rrd_storagename|rrd_function|rrd_time|rrd_value
+# rrd_nodeid|rrd_oid|rrd_function|rrd_time|rrd_value
+# rrd_nodeid|rrd_oid|rrd_interface|rrd_function|rrd_time|rrd_value
+
+use strict;
+#use warnings;
+use wtrs_etl;
+
+die("WTRS_SPOOL_RAW_CURRENT is not set") unless defined($ENV{WTRS_SPOOL_RAW_CURRENT});
+die("WTRS_SPOOL_BURNED is not set") unless defined($ENV{WTRS_SPOOL_BURNED});
+die("WTRS_CLIENT_WTID is not set") unless defined($ENV{WTRS_CLIENT_WTID});
+
+my $raw = $ENV{WTRS_SPOOL_RAW_CURRENT};
+my $burned = $ENV{WTRS_SPOOL_BURNED};
+my $wtid = $ENV{WTRS_CLIENT_WTID};
+
+my $ip_nk2sk;
+my $service_nk2sk;
+my $function_nk2sk;
+my $node_nk2sk;
+my $storage_nk2sk;
+my $oid_nk2sk;
+my $interface_nk2sk;
+
+my $fact;
+
+# stole this from stage2.  sure would be nice to share it.
+sub do_log {
+	my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
+	$year += 1900;
+	++$mon;
+	printf("%04d%02d%02d.%02d%02d%02d: $fact: @_\n",$year,$mon,$mday,$hour,$min,$sec);
+}
+
+sub cache_ip {
+	$ip_nk2sk = wtrs_etl::slurp_ip unless defined($ip_nk2sk);
+}
+
+sub cache_service {
+	$service_nk2sk = wtrs_etl::slurp_service unless defined($service_nk2sk);
+}
+
+sub cache_function {
+	$function_nk2sk = wtrs_etl::slurp_function unless defined($function_nk2sk);
+}
+
+sub cache_node {
+	$node_nk2sk = wtrs_etl::slurp_node unless defined($node_nk2sk);
+}
+
+sub cache_storage {
+	$storage_nk2sk = wtrs_etl::slurp_storage unless defined($storage_nk2sk);
+}
+
+sub cache_oid {
+	$oid_nk2sk = wtrs_etl::slurp_oid unless defined($oid_nk2sk);
+}
+
+sub cache_interface {
+	$interface_nk2sk = wtrs_etl::slurp_interface unless defined($interface_nk2sk);
+}
+
+my %out;	# output handles go here.  keyed by YYYY_MM
+my %rows_written;	# count rows written per output file.  keyed by YYYY_MM
+my $rows_read;	# count total rows read
+my $errors;	# count total errors
+
+sub open_infile {
+	undef %out;
+	undef %rows_written;
+	$rows_read = 0;
+	$errors = 0;
+
+	my $filename = "$raw/$fact.txt";
+	if(open(my $in,"<$filename")) { return($in); }
+
+	do_log "open($filename): $!";
+	do_log "error resolving fact $fact";
+	undef;
+}
+
+# examine timestamp.  partition data by year, month, and day.
+# output filenames have the form fact_YYYY_MM_DD.txt
+# hash keys are YYYY_MM_DD
+sub choose_outfile {
+	my $timestamp = shift;
+
+	my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday) = gmtime($timestamp);
+
+	$year += 1900;
+
+	++$mon;					# month is 0-based
+	$mon = "0" . $mon if($mon < 10);	# sprintf("%02d",$mon)
+
+	$mday = "0" . $mday if($mday < 10);	# sprintf("%02d",$mday)
+
+	my $tag = $year . "_" . $mon . "_" . $mday;
+	unless(defined($out{$tag})) {
+		my $filename = "$burned/$fact" . "_$tag.txt";
+		open($out{$tag},">$filename") || die("open($filename): $!");
+	}
+	++$rows_written{$tag};
+
+	$out{$tag};
+}
+
+# close output files.
+# log total rows read and rows written per file.
+# log errors.
+sub close_outfiles {
+	do_log "rows_read=$rows_read";
+	do_log "errors=$errors";
+	foreach my $key (sort (keys %out)) {
+		do_log "rows($fact" . "_$key)=$rows_written{$key}";
+		close($out{$key});
+	}
+	$fact = "";
+}
+
+# a node which has been deleted from WT may still have rrd files.
+# log it and continue.
+sub open_auditfile {
+	my $filename ="$burned/audit_$fact.txt";
+	open(my $audit,">$filename") || die("open($filename): $!");
+	$audit;
+}
+
+sub do_latency {
+	cache_ip;
+	cache_service;
+	cache_function;
+
+	my $in = open_infile;
+	return unless(defined($in));
+
+	while(<$in>) {
+		chomp;
+		my ($ip_nk,$service_nk,$function_nk,$timestamp,$value) = split(/\|/);
+		++$rows_read;
+
+		$ip_nk .= "_$wtid"; # the dimension_ip hash is keyed as ip_wtid
+		my $ip_sk = $ip_nk2sk->{$ip_nk};
+		my $service_sk = $service_nk2sk->{$service_nk};
+		my $function_sk = $function_nk2sk->{$function_nk};
+
+		if(!defined($ip_sk) || !defined($service_sk) || !defined($function_sk)) {
+			do_log "missing key for row $rows_read '$_'";
+			do_log "  ($ip_sk,$service_sk,$function_sk)";
+			exit 1;
+		}
+
+		my $out = choose_outfile $timestamp;
+		print $out "$ip_sk|$service_sk|$function_sk|$timestamp|$value\n";
+	}
+	close($in);
+	close_outfiles;
+}
+
+sub do_storage {
+	cache_node;
+	cache_oid;
+	cache_storage;
+	cache_function;
+
+	my $in = open_infile;
+	return unless(defined($in));
+
+	my $audit;
+
+	while(<$in>) {
+		chomp;
+		my ($node_nk,$oid_nk,$storage_nk,$function_nk,$timestamp,$value) = split(/\|/);
+		++$rows_read;
+
+		$node_nk .= "_$wtid";
+		my $node_sk = $node_nk2sk->{$node_nk};
+		my $oid_sk = $oid_nk2sk->{$oid_nk};
+		my $storage_sk = $storage_nk2sk->{$storage_nk};
+		my $function_sk = $function_nk2sk->{$function_nk};
+
+		if(!defined($node_sk)) {
+			$audit = open_auditfile unless(defined($audit));
+
+			print $audit "$errors,$rows_read|$node_nk,$oid_nk,$storage_nk,$function_nk,$timestamp,$value|$oid_sk,$storage_sk,$function_sk\n";
+
+			++$errors;
+			next;
+		}
+
+		if(!defined($oid_sk) || !defined($storage_sk) || !defined($function_sk)) {
+			do_log "missing key for row $rows_read '$_'";
+			do_log "  ($node_sk,$oid_sk,$storage_sk,$function_sk)";
+			exit 1;
+		}
+
+		my $out = choose_outfile $timestamp;
+		print $out "$node_sk|$storage_sk|$oid_sk|$function_sk|$timestamp|$value\n";
+	}
+	close($in);
+	close_outfiles;
+	close($audit) if(defined($audit));
+}
+
+sub do_node {
+	cache_node;
+	cache_oid;
+	cache_function;
+
+	my $in = open_infile;
+	return unless(defined($in));
+
+	my $audit;
+
+	while(<$in>) {
+		chomp;
+		my ($node_nk,$oid_nk,$function_nk,$timestamp,$value) = split(/\|/);
+		++$rows_read;
+
+		$node_nk .= "_$wtid"; # the effective natural key of dimension_node is nodeid + wtid
+		my $node_sk = $node_nk2sk->{$node_nk};
+		my $oid_sk = $oid_nk2sk->{$oid_nk};
+		my $function_sk = $function_nk2sk->{$function_nk};
+
+		if(!defined($node_sk)) {
+			$audit = open_auditfile unless(defined($audit));
+
+			print $audit "$errors,$rows_read|$node_nk,$oid_nk,$function_nk,$timestamp,$value|$oid_sk,$function_sk\n";
+
+			++$errors;
+			next;
+		}
+
+		if(!defined($oid_sk) || !defined($function_sk)) {
+			do_log "missing key for row $rows_read '$_'";
+			do_log "  ($node_sk,$oid_sk,$function_sk)";
+			exit 1;
+		}
+
+		my $out = choose_outfile $timestamp;
+		print $out "$node_sk|$oid_sk|$function_sk|$timestamp|$value\n";
+	}
+	close($in);
+	close_outfiles;
+	close($audit) if(defined($audit));
+}
+
+sub do_interface {
+	cache_oid;
+	cache_interface;
+	cache_function;
+
+	my $in = open_infile;
+	return unless(defined($in));
+
+	my $audit;
+
+	while(<$in>) {
+		chomp;
+		my ($nodeid,$oid_nk,$if_label,$function_nk,$timestamp,$value) = split(/\|/);
+		++$rows_read;
+
+		my $interface_nk = $wtid . '/' .  $nodeid . '/' .  $if_label;
+
+		my $oid_sk = $oid_nk2sk->{$oid_nk};
+		my $interface_sk = $interface_nk2sk->{$interface_nk};
+		my $function_sk = $function_nk2sk->{$function_nk};
+
+		if(!defined($interface_sk)) {
+			$audit = open_auditfile unless(defined($audit));
+
+			print $audit "$errors,$rows_read|$nodeid,$oid_nk,$if_label,$function_nk,$timestamp,$value|$oid_sk,$interface_sk,$function_sk\n";
+
+			++$errors;
+			next;
+		}
+
+		if(!defined($oid_sk) || !defined($interface_sk) || !defined($function_sk)) {
+			do_log "missing key for row $rows_read '$_'";
+			do_log "  ($oid_sk,$interface_sk,$function_sk)";
+			exit 1;
+		}
+
+		my $out = choose_outfile $timestamp;
+		print $out "$interface_sk|$oid_sk|$function_sk|$timestamp|$value\n";
+	}
+	close($in);
+	close_outfiles;
+	close($audit) if(defined($audit));
+}
+
+sub main {
+	foreach(@ARGV) {
+		$fact = $_;
+		do_latency if(/latency/);
+		do_storage if(/storage/);
+		do_node if(/node/);
+		do_interface if(/interface/);
+	}
+}
+
+main;

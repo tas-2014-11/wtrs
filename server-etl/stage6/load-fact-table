@@ -1,0 +1,56 @@
+#!/bin/bash
+
+. .wtrs
+
+#rotate etl/log
+
+do_load() {
+	table=$1
+	file=$2
+	log "do_load($table,$file) BEFORE count=`count $table`"
+
+	echo "COPY $table FROM '$file' DELIMITER '|';" | sql
+
+	log "do_load($*) AFTER  count=`count $table`"
+}
+
+do_checkpoint() {
+	log "START CHECKPOINT"
+	echo "CHECKPOINT;" | sql
+	log "END CHECKPOINT"
+}
+
+main() {
+	for fact in $*
+	do
+		for factfile in ${WTRS_SPOOL_BURNED:?}/${fact}_????_??_??.txt
+		do
+			if [ ! -f ${factfile} ]
+			then
+				log "no such file '$factfile'"
+				continue
+			fi
+
+			basename=${factfile##*/}
+			year_month=${basename#*_}
+			year_month=${year_month%.txt}
+			year=${year_month%%_*}
+			month=${year_month##*_}
+
+			if [ -z "$year" -o -z "$month" ]
+			then
+				log "parse error: factfile=$factfile basename=$basename year=$year month=$month"
+				continue
+			fi
+
+			#create-new-partition $fact $year $month
+			#do_load fact_${fact}_${year}_${month} $factfile
+
+			do_load fact_${fact} $factfile
+
+			do_checkpoint
+		done
+	done
+}
+
+main $*

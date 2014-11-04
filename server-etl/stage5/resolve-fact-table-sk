@@ -1,0 +1,3 @@
+#!/bin/bash
+. .wtrs
+really-resolve-fact-table-sk $*

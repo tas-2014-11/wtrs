@@ -1,0 +1,41 @@
+#!/bin/bash
+
+exec sql <<EOD
+SELECT
+	DISTINCT
+	ipinterface.nodeid,
+	ipinterface.ipaddr,
+	ipinterface.ifindex,
+	issnmpprimary,
+	snmpphysaddr,
+	snmpipadentnetmask
+FROM
+	service,
+	ifservices,
+	ipinterface
+	LEFT JOIN snmpinterface ON (
+		ipinterface.nodeid = snmpinterface.nodeid
+		AND
+		ipinterface.ifindex = snmpinterface.snmpifindex
+		AND
+		ipinterface.ipaddr = snmpinterface.ipaddr
+	)
+WHERE
+	ipinterface.ismanaged != 'D'
+AND
+	ipinterface.ipaddr = ifservices.ipaddr
+AND
+	ifservices.serviceid = service.serviceid
+AND
+	service.servicename = 'SNMP'
+AND
+	ipinterface.nodeid NOT IN (
+		SELECT DISTINCT nodeid FROM ipinterface WHERE issnmpprimary = 'P'
+	)
+AND
+	ipinterface.ifindex IS NOT NULL
+ORDER BY
+	1,2,3,4,5,6
+;
+
+EOD

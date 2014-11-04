@@ -1,0 +1,38 @@
+#!/bin/bash
+
+# everything has completed successfully.
+# we can now archive the raw data.
+
+. .wtrs
+
+rotate etl/log
+
+log "$0"
+
+remove_sentinel() {
+	mv ${WTRS_SPOOL:?}/.current ${WTRS_SPOOL:?}/.current.`date +"%s"`
+}
+
+# rename spool/raw/batchid/wtid to spool/raw/batchid/.wtid
+
+mv ${WTRS_SPOOL_RAW_CURRENT:?} ${WTRS_SPOOL_RAW:?}/${WTRS_CLIENT_BATCHID:?}/.${WTRS_CLIENT_WTID:?}
+
+# if there are no more wtid directories to process then
+# rename spool/raw/batchid to spool/raw/.batchid
+
+for wtid_dir in ${WTRS_SPOOL_RAW:?}/${WTRS_CLIENT_BATCHID:?}/[0-9]*
+do
+	if [ -d $wtid_dir ]
+	then
+		# directories remain.  don't rename batchid dir.
+
+		# but do remove sentinel.
+		remove_sentinel
+
+		exit 0
+	fi
+done
+
+mv ${WTRS_SPOOL_RAW:?}/${WTRS_CLIENT_BATCHID:?} ${WTRS_SPOOL_RAW:?}/.${WTRS_CLIENT_BATCHID:?}
+
+remove_sentinel

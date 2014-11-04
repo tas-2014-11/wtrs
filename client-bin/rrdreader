@@ -1,0 +1,61 @@
+#!/bin/bash
+
+. .wtrs-client
+
+rotate client/log
+
+export CLASSPATH=""
+separator=""
+for i in ${WTRS:?}/client/rrdreader/lib/*.jar
+do
+        CLASSPATH="$CLASSPATH$separator$i"
+
+        if [ -z "$separator" ]
+        then separator=":"
+        fi
+done
+log "CLASSPATH=$CLASSPATH"
+
+o=""
+o="$o -DRRDReader.wtid=${WTRS_CLIENT_WTID:?}"
+o="$o -DRRDReader.readdir=${WT_MONITOR_RRD:?}"
+
+o="$o -DRRDReader.outputmode=OneBigFileOverHttpViaPut"
+o="$o -DRRDReader.puturl=http://${WTRS_CLIENT_HTTPD_HOST:?}:${WTRS_CLIENT_HTTPD_PORT:?}/u"
+
+#o="$o -DRRDReader.outputmode=OneBigFile"
+#o="$o -DRRDReader.writedir=/tmp"
+
+o="$o -DRRDReader.batchidfile=${WTRS_CLIENT_SPOOL_BATCHID:?}"
+
+#o="$o -DRRDReader.filter.mintimestamp=0"
+#o="$o -DRRDReader.filter.maxtimestamp=`date +"%s"`"
+
+
+if [ -s ${WTRS_CLIENT_SPOOL_MINFILE:?} ]
+then
+	mintimestamp=`cat ${WTRS_CLIENT_SPOOL_MINFILE:?}`
+	log "mintimestamp=${mintimestamp:?}"
+	o="$o -DRRDReader.filter.mintimestamp=${mintimestamp:?}"
+else
+	log "no such file ${WTRS_CLIENT_SPOOL_MINFILE:?}"
+fi
+
+
+if [ -s ${WTRS_CLIENT_SPOOL_MAXFILE:?} ]
+then
+	maxtimestamp=`cat ${WTRS_CLIENT_SPOOL_MAXFILE:?}`
+	log "maxtimestamp=${maxtimestamp:?}"
+	o="$o -DRRDReader.filter.maxtimestamp=${maxtimestamp:?}"
+else
+	log "no such file ${WTRS_CLIENT_SPOOL_MAXFILE:?}"
+fi
+
+
+#o="$o -DRRDReader.reject.facts=interface,storage,latency"
+
+o="$o -DRRDReader.reject.functions=AVERAGE300"
+
+env | sort -u
+
+exec java $o com.cittio.wtrs.rrdreader.RRDReader $*

@@ -1,0 +1,14 @@
+#!/bin/bash
+
+. .wtrs-client
+
+rotate client/log
+
+log "$0"
+
+(
+
+rrdreader 1>&2
+echo exit
+
+) | ssh -L ${WTRS_CLIENT_HTTPD_PORT:?}:localhost:${WTRS_CLIENT_TUNNEL_PORT:?} ${WTRS_CLIENT_TUNNEL_HOST:?} 2>&1

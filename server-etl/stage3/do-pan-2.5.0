@@ -1,0 +1,20 @@
+#!/bin/bash
+
+. .wtrs
+
+log "$0: $*"
+
+kettle=${WTRS:?}/usr/kettle-2.5.0
+libext=$kettle/libext
+
+# put . (ascii 0x2e,aka dot) first in classpath so we pick up the correct log4j config.
+# don't run this from the $PATH.  always run it from $PWD.
+export CLASSPATH=.
+CLASSPATH=$CLASSPATH:$kettle/lib/kettle.jar
+CLASSPATH=$CLASSPATH:${WTRS:?}/usr/lib/postgresql-8.2-506.jdbc3.jar
+
+for i in `find $libext -name '*.jar'` `find $libext -name '*.zip'`
+do CLASSPATH=$CLASSPATH:$i
+done
+
+java -Xmx256m $WTRS_JAVA_OPTS be.ibridge.kettle.pan.Pan $*

@@ -1,0 +1,61 @@
+#!/bin/bash
+
+set -e
+sleep 3
+
+exec < /dev/null
+exec 1>> $0.txt
+exec 2>&1
+
+log() {
+	echo "`date +\"%Y%m%d.%H%M%S\"`: $*"
+}
+
+recipient=support_analytics@cittio.com
+
+trap 'log "$0: failed";email_error' ERR
+trap 'log "$0: exiting on SIGINT"'      SIGINT
+trap 'log "$0: exiting on SIGTERM"'     SIGTERM
+
+email_error() {
+	mail -s "CITTIO ANALYTICS: $0 failed on $HOSTNAME" $recipient <<EOD
+	`date`
+	0=$0
+	HOSTNAME=$HOSTNAME
+	batchid_file=$i
+EOD
+}
+
+main() {
+	log "$0"
+
+	current_file=/WTRS/spool/.current
+	if [ -s $current_file ]
+	then
+		log "'$current_file' already exists with contents '`cat $current_file`'"
+		log "This means that a job is already running (or one crashed hard)."
+	fi
+
+	#FIXME: race condition here.
+	#FIXME: if two start at the same time on a slow box it takes a while
+	#FIXME: before stage1 writes the sentinel file.
+
+	# batchid.txt is the last file clients write.
+	# if it exists we know a client is done uploading.
+	# its contents are currently unused here.
+
+	for i in /WTRS/spool/raw/[0-9]*.[0-9]*/[0-9]*/batchid.txt
+	do
+		if [ -s "$i" ]
+		then
+			log "start etl $i"
+
+			cd /WTRS/etl
+			/WTRS/bin/etl
+
+			log "end etl $i"
+		fi
+	done
+}
+
+main

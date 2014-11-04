@@ -1,0 +1,23 @@
+#!/bin/bash
+
+. .wtrs
+
+rotate etl/log
+
+cd ${WTRS_SPOOL_STEWED:?}
+
+tables="
+dimension_function
+dimension_interface
+dimension_node
+dimension_ip
+dimension_oid
+dimension_service
+dimension_storage
+"
+
+for table in $tables
+do
+	unload $table
+	log "$0: unload $table"
+done

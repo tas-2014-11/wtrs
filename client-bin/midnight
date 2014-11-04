@@ -1,0 +1,22 @@
+#!/usr/bin/perl
+
+use strict;
+use POSIX qw/floor/;
+
+my $debug = ($#ARGV >= 0);
+
+my $seconds_per_day = 86400;
+
+my $now = time;
+print "now=$now\n" if($debug);
+
+my $now_in_days = ($now / $seconds_per_day);
+print "now_in_days=$now_in_days\n" if($debug);
+
+my $last_midnight_in_days = floor($now_in_days);
+print "last_midnight_in_days=$last_midnight_in_days\n" if($debug);
+
+my $last_midnight = $last_midnight_in_days * $seconds_per_day;
+print "last_midnight=$last_midnight\n" if($debug);
+
+print "$last_midnight\n";

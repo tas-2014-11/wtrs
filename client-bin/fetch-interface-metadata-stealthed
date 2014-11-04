@@ -1,0 +1,50 @@
+#!/bin/bash
+
+exec sql <<EOD
+
+SELECT
+	DISTINCT
+	node.nodeid,
+	nodelabel,
+	fingerprint_info.operating_system,
+
+	ii_other.issnmpprimary,
+
+	'', -- si_primary.ipaddr
+	'', -- si_primary.snmpphysaddr
+	'', -- si_primary.snmpipadentnetmask
+
+	ii_other.issnmpprimary,
+	ii_other.iphostname,
+
+	si_other.ipaddr,
+	si_other.snmpipadentnetmask,
+	si_other.snmpphysaddr,
+	si_other.snmpifindex,
+	si_other.snmpifdescr,
+	si_other.snmpiftype,
+	si_other.snmpifname,
+	si_other.snmpifspeed,
+	si_other.snmpifalias
+FROM
+	node
+	LEFT JOIN snmpinterface si_other ON (
+		node.nodeid = si_other.nodeid
+	)
+	INNER JOIN ipinterface ii_other ON (
+		si_other.nodeid = ii_other.nodeid
+		AND
+		si_other.snmpifindex = ii_other.ifindex
+	)
+	LEFT JOIN fingerprint_info ON (
+		node.nodeid = fingerprint_info.nodeid
+	)
+WHERE
+	node.nodeid NOT IN (
+		SELECT DISTINCT nodeid FROM ipinterface WHERE issnmpprimary = 'P'
+	)
+ORDER BY
+	node.nodeid,
+	si_other.snmpifindex
+;
+EOD

@@ -1,0 +1,48 @@
+#!/bin/bash
+
+set -e
+
+export WTRS=${WTRS:-/WTRS}
+
+export PATH=${WTRS:?}/client/bin:$PATH
+export PATH=${WTRS:?}/bin:$PATH
+cd ${WTRS:?}/client/bin
+
+. .wtrs-client
+
+recipient=support_analytics@cittio.com
+
+email_error() {
+	mail -s "CITTIO ANALYTICS: $0 failed on $HOSTNAME" $recipient <<EOD
+	`date`
+	0=$0
+	HOSTNAME=$HOSTNAME
+EOD
+}
+
+trap 'log "$0: failed";email_error' ERR
+
+rotate client/log
+
+if [ -e ${WTRS_CLIENT_SPOOL_BATCHID:?} ]
+then
+	log "an upload is currently in progress (or one has crashed)"
+	log "  because WTRS_CLIENT_SPOOL_BATCHID=${WTRS_CLIENT_SPOOL_BATCHID:?} exists"
+	log "  and contains '`cat ${WTRS_CLIENT_SPOOL_BATCHID:?}`'"
+	email_error
+	exit 1
+fi
+
+calculate-dates
+
+rrdreader
+
+upload-dimension-node
+
+upload-datacollection-config-xml
+
+upload-interface-metadata
+
+notify-server
+
+mv ${WTRS_CLIENT_SPOOL_BATCHID:?} ${WTRS_CLIENT_SPOOL_BATCHID:?}.`date +"%s"`

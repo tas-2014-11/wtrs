@@ -1,0 +1,45 @@
+
+SELECT
+	nodelabel,name,os,wtid,
+	MAX(100*(fs_used.value/fs_size.value)) AS value
+
+FROM	fact_storage fs_used,
+	fact_storage fs_size,	
+	dimension_oid doid_size,
+	dimension_oid doid_used,
+	dimension_storage ds,
+	dimension_node dn,	
+	dimension_time dt,
+	dimension_function df
+
+WHERE df.function = 'MAX3600'
+
+AND fs_used.node_sk = dn.node_sk
+AND fs_used.oid_sk = doid_used.oid_sk
+AND fs_used.function_sk = df.function_sk
+AND fs_used.timestamp = dt.timestamp
+AND fs_used.storage_sk = ds.storage_sk
+
+AND fs_size.node_sk = dn.node_sk
+AND fs_size.function_sk = df.function_sk
+AND fs_size.timestamp = dt.timestamp
+AND fs_size.storage_sk = ds.storage_sk
+AND fs_size.oid_sk = doid_size.oid_sk
+
+AND doid_used.oid_wt_alias = 'hrStorageUsed'
+AND doid_size.oid_wt_alias = 'hrStorageSize'
+
+AND fs_size.value>0
+
+AND dt.datetime >= {?rXX_p01_startdate}
+AND dt.datetime < {?rXX_p02_enddate}
+
+GROUP BY name,os,nodelabel,wtid
+ORDER BY value DESC
+;
+
+
+
+2007-01-01 00:00:00
+
+

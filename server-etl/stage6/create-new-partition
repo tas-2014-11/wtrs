@@ -1,0 +1,151 @@
+#!/bin/bash
+
+. .wtrs
+
+exec 2>&1
+
+fact=${1:?}
+year=${2:?}
+month=${3:?}
+
+parent=fact_$fact
+table=${parent}_${year}_${month}
+
+exit_if_table_exists() {
+	table_exists=`echo "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename = '$table';" | sql`
+	echo table_exists=$table_exists
+
+	if [ -n "$table_exists" ]
+	then
+		echo "table '$table' already exists"
+		#exit 0
+	fi
+}
+exit_if_table_exists
+
+min_timestamp=`ym2int $year $month`
+
+let next_month=$month+1
+max_timestamp=`ym2int $year $next_month`
+
+do_sql() {
+	log "$0: sql=$sql"
+	echo "$sql" | sql
+}
+
+create_table() {
+	sql="CREATE TABLE $table (
+		CHECK (timestamp >= $min_timestamp AND timestamp < $max_timestamp)
+	) INHERITS($parent) WITH(FILLFACTOR=100);"
+
+	do_sql
+}
+create_table
+
+#these lists are redundant with the fk lists (sort of)
+fact_node_pk="node_sk,oid_sk,function_sk,timestamp"
+fact_latency_pk="ip_sk,service_sk,function_sk,timestamp"
+fact_storage_pk="node_sk,storage_sk,oid_sk,function_sk,timestamp"
+fact_interface_pk="node_sk,interface_sk,oid_sk,function_sk,timestamp"
+
+create_primary_key() {
+	eval pk=\$fact_${fact}_pk
+
+	sql="ALTER TABLE $table ADD PRIMARY KEY($pk);"
+
+	do_sql
+}
+create_primary_key
+
+fact_node_fk_list="
+node_sk:dimension_node
+oid_sk:dimension_oid
+function_sk:dimension_function
+timestamp:dimension_time
+"
+
+fact_latency_fk_list="
+ip_sk:dimension_ip
+service_sk:dimension_service
+function_sk:dimension_function
+timestamp:dimension_time
+"
+
+fact_storage_fk_list="
+node_sk:dimension_node
+storage_sk:dimension_storage
+oid_sk:dimension_oid
+function_sk:dimension_function
+timestamp:dimension_time
+"
+
+fact_interface_fk_list="
+node_sk:dimension_node
+interface_sk:dimension_interface
+oid_sk:dimension_oid
+function_sk:dimension_function
+timestamp:dimension_time
+"
+
+create_foreign_keys() {
+	eval fk_list=\$fact_${fact}_fk_list
+
+	for fk in $fk_list
+	do
+		column=${fk%:*}
+		dimension=${fk#*:}
+
+		fkname=${table}_${column}_fkey
+
+		sql="ALTER TABLE $table ADD CONSTRAINT $fkname FOREIGN KEY($column) REFERENCES $dimension;"
+		do_sql
+	done
+}
+create_foreign_keys
+
+# http://www.postgresql.org/docs/current/static/indexes-multicolumn.html
+# http://www.postgresql.org/docs/current/static/indexes-bitmap-scans.html
+
+fact_latency_index_list="
+function_sk,service_sk,timestamp
+value
+"
+
+fact_node_index_list="
+oid_sk,function_sk,timestamp
+"
+
+fact_storage_index_list="
+oid_sk,function_sk,timestamp
+"
+
+fact_interface_index_list="
+oid_sk,function_sk,timestamp
+"
+
+create_indexes() {
+	eval index_list=\$fact_${fact}_index_list
+
+	for index in $index_list
+	do
+		indexname=${table}_index_${index//,/_}
+
+		sql="CREATE INDEX $indexname ON $table($index);"
+		do_sql
+	done
+}
+create_indexes
+
+create_insert_rule() {
+	echo -e "\n  this is not needed"
+	exit 1
+
+	cat <<EOD
+
+	CREATE RULE rule_insert_$table AS
+	ON INSERT TO $parent WHERE (timestamp >= $min_timestamp AND timestamp < $max_timestamp)
+	DO INSTEAD INSERT INTO $table VALUES (NEW.*);
+
+EOD
+}
+#create_insert_rule

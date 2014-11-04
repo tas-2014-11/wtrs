@@ -1,0 +1,29 @@
+#!/bin/bash
+
+. .wtrs
+
+log "$0: $*"
+
+kettle=${WTRS:?}/usr/kettle-2.4.0
+libext=$kettle/libext
+
+# important!  put . first in classpath so we pick up the correct log4j config
+# don't run this from the $PATH.  always run it from $PWD.
+export CLASSPATH=.
+CLASSPATH=$CLASSPATH:$kettle/lib/kettle.jar
+CLASSPATH=$CLASSPATH:${WTRS:?}/usr/lib/postgresql-8.2-506.jdbc3.jar
+
+for i in `find $libext -name '*.jar'` `find $libext -name '*.zip'`
+do
+	#some bright person included log4j configs in the jars they shipped.
+	#and it looks like these jars aren't even necessary for what i'm doing.
+	#case $i in
+		#*jackcess-1.1.5.jar|*pentaho-1.2.0.jar)
+			#continue
+		#;;
+	#esac
+
+	CLASSPATH=$CLASSPATH:$i
+done
+
+java -Xmx256m $WTRS_JAVA_OPTS be.ibridge.kettle.pan.Pan $*

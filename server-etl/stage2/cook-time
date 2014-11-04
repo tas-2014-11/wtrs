@@ -1,0 +1,44 @@
+#!/bin/bash
+# rrd_ipaddress|rrd_service|rrd_function|rrd_time|rrd_value
+# rrd_nodeid|rrd_oid|rrd_storagename|rrd_function|rrd_time|rrd_value
+# rrd_nodeid|rrd_oid|rrd_function|rrd_time|rrd_value
+# rrd_nodeid|rrd_oid|rrd_interface|rrd_function|rrd_time|rrd_value
+
+. .wtrs
+
+d=${WTRS_SPOOL_COOKED:?}
+
+go() {
+	log "$0: go(${1:?},${2:?})"
+
+	in=${WTRS_SPOOL_RAW_CURRENT:?}/$1.txt
+	out=$d/$1.timestamp.txt
+
+	if [ ! -f $in ]
+	then
+		log "$0: no such file '$in'"
+		return 0
+	fi
+
+	log "$0: in=$in out=$out"
+
+	cut -f$2 -d'|' $in | sort -u > $out
+}
+
+consolidate() {
+	in=$d/*.timestamp.txt
+	out=$d/time_nk.txt
+
+	log "$0: consolidate in=$in out=$out"
+
+	sort -u $in > $out
+
+	log "$0: finished"
+}
+
+go latency 4
+go storage 5
+go node 4
+go interface 5
+
+consolidate

@@ -1,0 +1,687 @@
+#!/usr/bin/perl
+
+# here's the general approach...
+# 1. traverse the wt rrd directories and accumulate all [nodeid,iflabel] pairs (done externally: $rrd_nk_filename)
+# 2. store this as a map from nodeid onto the set of all labels for that node ($nodeid2iflabellist)
+# 3. read data from the wt database: node,ipinterface,snmpinterface (done externally: $si_filename)
+# 4. use that data to construct candidate node labels.  note that this may (will!) result in duplicates.
+# 5. store this as a map from candidate labels (per node) onto the generating wt data ($label2silist)
+# 6. a [node,label] with more than one wt data row means the reverse mapping is ambiguous.  discard.
+# 7. locate wt data for each rrd directory.  print.
+
+use strict;
+
+die("WTRS_CLIENT_WTID is not set") unless defined($ENV{WTRS_CLIENT_WTID});
+die("WTRS_SPOOL_COOKED is not set") unless defined($ENV{WTRS_SPOOL_COOKED});
+die("WTRS_SPOOL_RAW_CURRENT is not set") unless defined($ENV{WTRS_SPOOL_RAW_CURRENT});
+
+my $wtid = $ENV{WTRS_CLIENT_WTID};
+my $cooked = $ENV{WTRS_SPOOL_COOKED};
+my $raw = $ENV{WTRS_SPOOL_RAW_CURRENT};
+
+#these are the natural keys (nodeid/iflabel) which rrdreader collected from the filesystem
+my $rrd_nk_filename = "$cooked/interface_rrd_nk.txt";
+
+#this is the metadata about interfaces pulled from the wt pg
+my $si_filename = "$raw/interface_metadata.txt";
+
+#here is the list of interfaces which are candidates to become snmpprimaries
+#it's not the full list - some pre-selection was done by the sql
+my $candidate_snmpprimaries_filename = "$raw/candidate_snmpprimaries.txt";
+
+#here's the set of natural keys alread in wtrs
+my $dim_nk_filename = "$cooked/interface_dim_nk.txt";
+
+#log messages to stderr
+sub do_log {
+	select(STDERR);
+
+	my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
+	$year += 1900;
+	++$mon;
+	printf("%04d%02d%02d.%02d%02d%02d: @_\n",$year,$mon,$mday,$hour,$min,$sec);
+}
+
+#write to this
+my $outfilename = "$cooked/dimension_interface_preload.txt";
+my $outfd;
+
+sub select_output_file {
+	if(!defined($outfd)) {
+		open($outfd,">$outfilename") || die("open($outfilename): $!");
+	}
+	select($outfd);
+}
+
+#bad input rows go here
+my $auditfilename = "$cooked/audit_interface_si.txt";
+my $auditfd;
+
+sub select_audit_file {
+	if(!defined($auditfd)) {
+		open($auditfd,">$auditfilename") || die("open($auditfilename): $!");
+	}
+	select($auditfd);
+}
+
+# WatchTower/monitor/src/src/services/org/opennms/netmgt/utils/IfLabel.java#getIfLabel
+# if_label = length(ifname) ? ifname : (length(descr) ? descr : "no_label")
+# if_label += "-" + physaddr unless length(physaddr) != 12
+# WatchTower/monitor/src/src/services/org/opennms/netmgt/utils/AlphaNumeric.java#parseAndReplace
+# characters which are not [0-9A-Za-z] are changed to '_' (underscore.  not smily.)
+
+sub AlphaNumeric_parseAndReplace {
+	my $s = shift;
+	my @s = split(//,$s); #TODO: there's got to be a better way
+	my $out = "";
+	foreach my $ch (@s) {
+		my $c = ord($ch);
+		$out .= $ch,next if ($c >= 0x30 and $c <= 0x39);
+		$out .= $ch,next if ($c >= 0x41 and $c <= 0x5a);
+		$out .= $ch,next if ($c >= 0x61 and $c <= 0x7a);
+		$out .= '_';
+	}
+	$out;
+}
+
+sub IfLabel_getIfLabel {
+	my $h = shift;
+	my $ifname = $h->{si_other_snmpifname};
+	my $ifdescr = $h->{si_other_snmpifdescr};
+	my $physaddr = $h->{si_other_snmpphysaddr};
+
+	#print "$ifname,$ifdescr,$physaddr\n";
+
+	my $label = AlphaNumeric_parseAndReplace($ifname);
+	$label = AlphaNumeric_parseAndReplace($ifdescr) unless(length($label));
+	$label = "no_ifLabel" unless(length($label));
+
+	$label .= "-" .  AlphaNumeric_parseAndReplace($physaddr) unless(12 != length($physaddr));
+
+	$label;
+}
+
+sub dottedquad2int {
+	my $dottedquad = shift;
+	#my @a = split(/\./,$dottedquad);
+	#return(0) if($#a != 3);
+
+	if($dottedquad =~ /(\d+)\.(\d+)\.(\d+)\.(\d+)/) {
+		my $i = $4;
+		$i |= $3 << 8;
+		$i |= $2 << 16;
+		$i |= $1 << 24;
+
+		#sprintf("0x%08x",$i);
+		#update table set column = x'ff'::int;
+
+		return($i);
+	}
+
+	return(0);
+}
+
+sub calculate_netmask_width {
+	my $dottedquad = shift;
+	my $intval = dottedquad2int($dottedquad);
+	my $nbits = 0;
+	while($intval) {
+		$intval <<= 1;
+		++$nbits;
+	}
+	$nbits;
+}
+
+#some data that ends up in wtrs is derived from wt data.  start deriving!
+sub calculate_fields {
+	my $href = shift;
+
+	$href->{wtid} = $wtid;
+
+	$href->{if_label} = IfLabel_getIfLabel($href);
+
+	$href->{node_ip_raw} = dottedquad2int($href->{si_primary_ipaddr});
+	$href->{node_netmask_width} =
+		calculate_netmask_width($href->{si_primary_snmpipadentnetmask});
+
+	#FIXME:  write this
+	$href->{if_type_text} = "";
+
+	$href->{if_ip_raw} = dottedquad2int($href->{si_other_ipaddr});
+	$href->{if_netmask_width} = "";
+		calculate_netmask_width($href->{si_other_snmpipadentnetmask});
+
+	#FIXME: fetch from fingerprint_info
+	$href->{operatingsystem} = "";
+
+	#FIXME: write this
+	$href->{node_mac_raw} = "";
+
+	#FIXME: write this
+	$href->{if_mac_raw} = "";
+}
+
+sub positive_int_or_die {
+	my $href = shift;
+	my $key = shift;
+	die "parse error ($key,$href->{$key})" unless(0 + $href->{$key} > 0);
+}
+
+sub sanitycheck_some_fields {
+	my $href = shift;
+
+	#nodeid and ifindex are natural keys.  bail if they're not sane.
+	#FIXME: this shouldn't be fatal.  should write audit log and continue.
+	positive_int_or_die($href,'nodeid');
+	positive_int_or_die($href,'si_other_snmpifindex');
+}
+
+#parse row:  split fields.  stuff them into hash.  calculate calculable fields.
+sub parse_one_si {
+	my $line = shift;
+
+	my @a = split(/\|/,$line);
+
+	#these names come from the sql.
+	#si means snmpinterface. ii means ipinterface.
+	#primary means snmpprimary. other means not-snmpprimary.
+	my @fields = qw/
+		nodeid nodelabel operatingsystem
+		issnmpprimary
+		si_primary_ipaddr si_primary_snmpphysaddr si_primary_snmpipadentnetmask
+		ii_other_issnmpprimary ii_other_iphostname
+		si_other_ipaddr si_other_snmpipadentnetmask si_other_snmpphysaddr
+		si_other_snmpifindex si_other_snmpifdescr si_other_snmpiftype
+		si_other_snmpifname si_other_snmpifspeed si_other_snmpifalias/;
+
+	#make sure the line split into as many columns as we expect
+	#doesn't quite work when final field is null
+	#die("bad field count (expected $#fields found $#a) '$line'") if($#fields != $#a);
+	#allow off-by-one. but only in one direction. (still catches egregious input errors.)
+	die("bad field count (expected $#fields found $#a) '$line'") if($#fields - $#a > 1 || $#fields < $#a);
+
+	my $href = {};
+	my $i = 0;
+	foreach(@fields) {
+		my $value = $a[$i];
+		$value = "" unless(defined($value));
+		$href->{$_} = $value;
+		++$i;
+	}
+
+	sanitycheck_some_fields($href);
+
+	calculate_fields($href);
+
+	$href;
+}
+
+#read rows.  parse.  append hash ref onto array.
+sub read_all_si {
+	my @a;
+	open(my $in,"<$si_filename") || die "open($si_filename): $!";
+	while(<$in>) {
+		chomp;
+		my $href = parse_one_si($_);
+		push(@a,$href);
+	}
+	close($in);
+	\@a;
+}
+
+sub parse_one_candidate_snmpprimary {
+	my $line = shift;
+
+	my @a = split(/\|/,$line);
+
+	my @fields = qw/nodeid ipaddr ifindex issnmpprimary physaddr netmask/;
+
+	my $href = {};
+	my $i = 0;
+	foreach(@fields) {
+		my $value = $a[$i];
+		$value = "" unless(defined($value));
+		$href->{$_} = $value;
+		++$i;
+	}
+
+	#convert ip address to an integer.  we'll use this to sort.
+	$href->{ipaddr_raw} = dottedquad2int($href->{ipaddr});
+
+	$href;
+}
+
+#read and parse the list of snmpprimary candidates
+#discard all except the smallest ipaddress per node
+#return hash keyed by nodeid.
+#value is hash. attributes are snmpprimary qw/nodeid ipaddr ifindex issnmpprimary ipaddr_raw/;
+sub read_all_candidate_snmpprimaries {
+	my $all = {};
+	open(my $in,"<$candidate_snmpprimaries_filename") || die "open($candidate_snmpprimaries_filename): $!";
+	while(<$in>) {
+		chomp;
+		my $one = parse_one_candidate_snmpprimary($_);
+
+		#discard rows without an ifindex.  (how can this happen?)
+		next unless length($one->{ifindex});
+
+		#store the candidate with the smallest ip address
+		my $nodeid = $one->{nodeid};
+		if(defined $all->{$nodeid}) {
+			next if($all->{$nodeid}->{ipaddr_raw} < $one->{ipaddr_raw});
+		}
+
+		$all->{$nodeid} = $one;
+	}
+	close($in);
+
+	$all;
+}
+
+sub locate_stealthed_snmpprimaries {
+	my $raw = shift;
+	my @cooked;
+
+	my $nodeid2silist = {};
+
+	#pivot the si_list.  construct map from nodeid onto metadata per node.
+	#key is nodeid.  value is aref with all interfaces for this node.
+	#whenever issnmpprimary == 'P' there should be good snmpprimary data.
+	#for other values of issnmpprimary the ipaddr,physaddr,and netmask columns are null.
+	foreach my $h (@$raw) {
+		my $nodeid = $h->{nodeid};
+		my $aref = $nodeid2silist->{$nodeid};
+		if(!defined $aref) {
+			my @a;
+			$aref = \@a;
+			$nodeid2silist->{$nodeid} = $aref;
+		}
+		push(@$aref,$h);
+	}
+
+	my $snmpprimaries = read_all_candidate_snmpprimaries;
+
+	#find rows without snmpprimary data and give them some
+	foreach my $nodeid (sort(keys %$nodeid2silist)) {
+		my $aref = $nodeid2silist->{$nodeid};
+		next if(${$aref}[0]->{issnmpprimary} =~ /P/);
+
+		#fetch the winning snmpprimary candidate.  stuff its data into all rows for this node.
+
+		my $snmpprimary = $snmpprimaries->{$nodeid};
+		next unless(defined $snmpprimary); #TODO: log or audit???
+
+		foreach my $h (@$aref) {
+			$h->{si_primary_ipaddr} = $snmpprimary->{ipaddr};
+			$h->{si_primary_snmpphysaddr} = $snmpprimary->{physaddr};
+			$h->{si_primary_snmpipadentnetmask} = $snmpprimary->{netmask};
+		}
+	}
+
+	#flatten the hash back into an array.
+	foreach my $nodeid (sort(keys %$nodeid2silist)) {
+		my $aref = $nodeid2silist->{$nodeid};
+		foreach my $h (@$aref) {
+			push(@cooked,$h);
+		}
+	}
+
+	\@cooked;
+}
+
+#pivot the snmpinterface data from wt
+#key is [nodeid,iflabel]
+#value is array ref containing a list of rows on this node which map to this label.
+sub build_label2silist {
+	my $aref = shift;
+	my $label2silist = {};
+
+	foreach my $href (@$aref) {
+		my $nodeid = $href->{nodeid};
+		my $if_label = $href->{if_label};
+
+		my $key = "$nodeid/$if_label";
+
+		my $value = $label2silist->{$key};
+		if(!defined $value) {
+			my @a;
+			$value = \@a;
+			$label2silist->{$key} = $value;
+		}
+		push(@$value,$href);
+	}
+
+	$label2silist;
+}
+
+#read (nodeid,iflabel) pairs (the ones gathered from the filesystem) into a hash.
+#key is nodeid.  value is another hash.  its key is iflabel.  its value is unused.
+sub build_nodeid2iflabellist {
+	my $h = {};
+	open(my $in,"<$rrd_nk_filename") || die "open($rrd_nk_filename): $!";
+	while(<$in>) {
+		chomp;
+		my ($nodeid,$iflabel) = split(/\|/);
+		if(!defined($nodeid) || !defined($iflabel)) {
+			die "bad nk($nodeid,$iflabel) in '$rrd_nk_filename'";
+		}
+
+		if(!defined($h->{$nodeid})) {
+			$h->{$nodeid} = {};
+		}
+		$h->{$nodeid}->{$iflabel} = 1;
+	}
+	close($in);
+	$h;
+}
+
+#key is nk (nodeid,iflabel)
+#value is unused
+#don't need wtid in key because we only work with one wtid at a time
+sub build_alreadyloaded {
+	my $h = {};
+	open(my $in,"<$dim_nk_filename") || die "open($dim_nk_filename): $!";
+	while(<$in>) {
+		chomp;
+		my ($nodeid,$iflabel) = split(/\|/);
+		my $key = "$nodeid/$iflabel";
+		$h->{$key} = 1;
+	}
+	close($in);
+	$h;
+}
+
+my $ifs = "";
+
+sub field {
+	print "$ifs$_[0]";
+	$ifs = "|";
+}
+
+sub spacer {
+	print "  #  ";
+	$ifs = "";
+}
+
+sub record {
+	print "\n";
+	$ifs = "";
+}
+
+sub prettyprint_si {
+	my $href = shift;
+
+	my @fields = qw/
+		wtid
+		nodeid
+		_nodelabel
+		_operatingsystem
+		si_primary_ipaddr si_primary_snmpphysaddr si_primary_snmpipadentnetmask
+		spacer
+		ii_other_issnmpprimary
+		si_other_ipaddr
+		_si_other_snmpipadentnetmask
+		si_other_snmpphysaddr
+		si_other_snmpifindex
+		_si_other_snmpifdescr
+		_si_other_snmpiftype
+		spacer
+		si_other_snmpifname
+		_si_other_snmpifspeed
+		_si_other_snmpifalias
+		if_label
+	/;
+
+	foreach(@fields) {
+		next if(/^_/);
+		spacer,next if(/spacer/);
+		die("bad field '$_'") unless defined($href->{$_});
+		field "$href->{$_}";
+	}
+	record;
+}
+
+#fields named like dimension_interface columns are those which we generate.
+#fields named like wt sql pass through unmodified.
+sub dump_si {
+	my $href = shift;
+	my $prefix = shift;
+
+	my @fields = qw/
+		wtid
+		nodeid
+		si_primary_ipaddr
+		node_ip_raw
+		si_primary_snmpipadentnetmask
+		node_netmask_width
+		si_primary_snmpphysaddr
+		node_mac_raw
+		operatingsystem
+		nodelabel
+
+		si_other_snmpifindex
+		si_other_snmpiftype
+		if_type_text
+		si_other_ipaddr
+		if_ip_raw
+		si_other_snmpipadentnetmask
+		if_netmask_width
+		si_other_snmpphysaddr
+		if_mac_raw
+		si_other_snmpifspeed
+		si_other_snmpifname
+		si_other_snmpifdescr
+		si_other_snmpifalias
+
+		ii_other_iphostname
+		if_label
+		ii_other_issnmpprimary
+	/;
+
+	field "$prefix" if(defined($prefix));
+	foreach(@fields) {
+		next if(/^_/);
+		spacer,next if(/spacer/);
+		die("bad field '$_'") unless defined($href->{$_});
+		field "$href->{$_}";
+	}
+	record;
+}
+
+sub prettyprint_all_si {
+	my $aref = shift;
+	foreach(@$aref) { prettyprint_si($_); }
+	print "\n";
+}
+
+sub dump_all_si {
+	my $aref = shift;
+	my $prefix = shift;
+	foreach(@$aref) { dump_si($_,$prefix); }
+}
+
+sub prettyprint_label2silist {
+	my $label2silist = shift;
+	foreach my $label (sort(keys %$label2silist)) {
+		my $aref = $label2silist->{$label};
+		#next unless($#$aref > 1);
+
+		print "  label=$label\n";
+		dump_all_si($aref);
+		print "\n";
+	}
+}
+
+sub dump_label2silist {
+	my $label2silist = shift;
+	foreach my $label (sort(keys %$label2silist)) {
+		my $aref = $label2silist->{$label};
+		#next unless($#$aref > 1);
+
+		dump_all_si($aref);
+	}
+}
+
+sub prettyprint_nodeid2iflabellist {
+	my $href = shift;
+	foreach(sort(keys %$href)) {
+		print "$_: ";
+		my $row_href = $href->{$_};
+		foreach(sort(keys %$row_href)) {
+			print "$_ ";
+		}
+		print "\n";
+	}
+}
+
+sub dump_alreadyloaded {
+	my $h = shift;
+	foreach(sort(keys %$h)) {
+		print "$_\n";
+	}
+}
+
+sub generate_null_si {
+	my $silist = shift;
+	my $null_si = {};
+	my @null_silist;
+
+	my $si0 = $silist->[0];
+
+	my $wtid = $si0->{wtid};
+	my $nodeid = $si0->{nodeid};
+	my $iflabel = $si0->{if_label};
+
+	do_log "generating null si for ($wtid,$nodeid,$iflabel)";
+
+	#sanity check - make sure all rows really do share the same nk set.
+	#log and noop if there's a problem.
+	foreach my $si (@$silist) {
+		if($wtid ne $si->{wtid} || $nodeid ne $si->{nodeid} || $iflabel ne $si->{if_label}) {
+			do_log "failed sanity check ($wtid,$nodeid,$iflabel) != ($si->{wtid},$si->{nodeid},$si->{if_label})";
+		}
+	}
+
+	#peel off all fields from the source si.
+	#but insert nulls instead of copying values.
+	foreach my $field (keys %$si0) {
+		$null_si->{$field} = "";
+	}
+
+	#prettyprint_si($null_si);
+
+	#fill in the nk fields
+	$null_si->{wtid} = $wtid;
+	$null_si->{nodeid} = $nodeid;
+	$null_si->{if_label} = $iflabel;
+
+	#prettyprint_si($null_si);
+
+	$null_silist[0] = $null_si;
+	\@null_silist;
+}
+
+sub resolve_stuff {
+	my $nodeid2iflabellist = shift;
+	my $label2silist = shift;
+	my $alreadyloaded = shift;
+
+	# create an empty output file even if there are zero rows to process 
+	select_output_file;
+	select(STDERR);
+
+	foreach my $nodeid (sort {0+$a <=> 0+$b} (keys %$nodeid2iflabellist)) {
+		my $iflabellist = $nodeid2iflabellist->{$nodeid};
+
+		foreach my $iflabel (sort (keys %$iflabellist)) {
+			my $key = "$nodeid/$iflabel";
+
+			#1. now take the nodeid/iflabel we collected from the filesystem
+			#2. locate the set of wt pg rows that can generate this nodeid/iflabel
+			#3. sometimes there are zero wt pg rows that can can produce this iflabel
+			#4. sometimes that means that a node was hard deleted from wt
+			#5. sometimes that means that the wt snmpinterfaces data was updated
+			#6. either way it means that when stage5 arrives we'll have orphan facts
+			#7. otoh, there may already be dimension data in wtrs
+			#8. in which case the orphans will get adopted
+			#9. but there's no way we can know that yet
+			#9b. so we just log the nodeid/iflabel and let stage5 deal with it
+
+			#the magic happens here
+			my $silist = $label2silist->{$key};
+
+			if(!defined($silist)) {
+				do_log "$key has no metadata";
+				next;
+			}
+
+			#10. sometimes there are multiple wt pg rows that map onto this iflabel
+			#11. the correct source row is unknowable
+			#12. we could insert nulls for this nk(wtid,nodeid,iflabel)
+			#13. but it's possible that there is already a dim row in wtrs for this nk
+			#14. if there is and it's null then kettle will noop
+			#15. if there is and it's good data from the ancient past then we'll squash it
+			#15b. we do not want to squash good data
+			#16. so what we must do is unload the dim nk's and check
+			#17. if there is no row already loaded then we may safely insert nulls
+			#18. if there is one+ row already loaded then we do nothing (log and continue)
+			#19. because that row has either good data (which we don't want to squash)
+			#20. or it has nulls (which was all we were going to insert anyway)
+
+			if($#$silist > 0) {
+				my $count = 1 + $#$silist;
+				do_log "$key has ambiguous map (count=$count)";
+
+				#if there's already data for this nodeid/iflabel in the dim log and noop.
+				if(defined($alreadyloaded->{$key})) {
+					do_log "$key already has dimension row";
+					select_audit_file;
+					dump_all_si($silist,"PASS1");
+					next;
+				}
+				else {
+					do_log "$key inserting null dimension row";
+					select_audit_file;
+					dump_all_si($silist,"PASS2");
+
+					#generate single-row aref with only nk fields populated
+					my $null_si = generate_null_si($silist);
+
+					select_output_file;
+					dump_all_si($null_si);
+					next;
+				}
+			}
+
+			#21. but what we really want it there to be only a single possible map
+			#22. when that happens (which it usually does) just insert that row into the dim
+
+			do_log "$key";
+
+			select_output_file;
+			dump_all_si($silist);
+		}
+	}
+}
+
+sub main {
+	my $nodeid2iflabellist = build_nodeid2iflabellist;
+	#prettyprint_nodeid2iflabellist($nodeid2iflabellist);
+
+	my $si_aref_raw = read_all_si;
+	#dump_all_si($si_aref_raw);
+
+	my $si_aref_cooked = locate_stealthed_snmpprimaries($si_aref_raw);
+
+	my $label2silist = build_label2silist($si_aref_cooked);
+
+	#dump_label2silist($label2silist);
+	#prettyprint_label2silist($label2silist);
+
+	my $alreadyloaded = build_alreadyloaded;
+	#dump_alreadyloaded($alreadyloaded);
+
+	resolve_stuff($nodeid2iflabellist,$label2silist,$alreadyloaded);
+}
+
+main;

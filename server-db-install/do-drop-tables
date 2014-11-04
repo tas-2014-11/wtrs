@@ -1,0 +1,19 @@
+#!/bin/bash
+
+echo "there's a really good chance that you don't want to run this."
+exit
+
+. .wtrs
+
+rotate db/log
+
+table_list=`cat .tables`
+
+go() {
+	for table in $table_list
+	do
+		echo "DROP TABLE $table CASCADE;"
+	done
+}
+
+go | sql

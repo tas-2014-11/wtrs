@@ -1,0 +1,28 @@
+# .wtrs-client
+
+set -e
+
+trap 'echo "$0: failed"' ERR
+
+. .wtrs
+
+export WTRS_CLIENT_WTID=37
+
+export WT_MONITOR_RRD=/WT/monitor/rrd
+
+export WTRS_CLIENT_HTTPD_HOST=localhost
+export WTRS_CLIENT_HTTPD_PORT=7308
+
+WTRS_CLIENT_SPOOL=${WTRS:?}/client/spool
+WTRS_CLIENT_SPOOL_BATCHID=${WTRS_CLIENT_SPOOL:?}/.batchid
+
+WTRS_CLIENT_SPOOL_MINFILE=${WTRS_CLIENT_SPOOL:?}/.min
+WTRS_CLIENT_SPOOL_MAXFILE=${WTRS_CLIENT_SPOOL:?}/.max
+
+#use this for OneBigFile
+#export WTRS_CLIENT_SPOOL_RAW=${WTRS_CLIENT_SPOOL:?}/raw
+
+if [ -s ${WTRS_CLIENT_SPOOL_BATCHID:?} ]
+then
+	export WTRS_CLIENT_BATCHID=`cat ${WTRS_CLIENT_SPOOL_BATCHID:?}`
+fi

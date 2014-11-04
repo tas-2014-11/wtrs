@@ -1,0 +1,19 @@
+#!/usr/bin/perl
+# take a year and month as input
+# output the UNIX-style time value for the first day of that year / month
+
+use POSIX qw(mktime);
+
+if($#ARGV != 1) {
+	print STDERR "Usage: $0 YYYY MM\n";
+	exit 1;
+}
+
+$ENV{'TZ'} = 'UTC';
+
+$year = $ARGV[0] - 1900;
+$month = $ARGV[1] - 1; # month is zero-based
+
+$intval = mktime($sec,$min,$hour,$mday=1,$month,$year,$wday,$yday,$isdst);
+
+print "$intval\n";

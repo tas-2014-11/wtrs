@@ -1,0 +1,36 @@
+#!/usr/bin/perl
+
+$fn = "/WT/monitor/etc/datacollection-config.xml";
+
+open(IN,"<$fn") || die "open($fn)";
+
+# <mibObj oid="1.3.6.1.4.1.311.1.1.3.1.1.78.2" instance="0" alias="exMTAMsgs" type="Integer"/>
+
+while(<IN>) {
+	if(/oid="([\d\.]+)" .* alias="([\w]+)"/) {
+		$oid=$1;
+		$wt_alias=$2;
+
+		if($oid =~ /^1/) {
+			#print "oid typo '$oid'\n";
+			$oid = "." . $oid;
+		}
+
+		#print "$oid $wt_alias\n";
+
+		if(defined $h{$wt_alias}) {
+			next if($h{$wt_alias} =~ $oid);
+		}
+
+		$h{$wt_alias} .= " $oid";
+	}
+}
+
+foreach $k (sort(keys %h)) {
+	#print "$k: $h{$k}\n";
+
+	@a = split(' ',$h{$k});
+	if($#a > 0) {
+		print "$k: $h{$k}\n";
+	}
+}

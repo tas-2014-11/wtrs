@@ -1,0 +1,2 @@
+#!/bin/bash
+echo "SELECT COUNT(*) FROM $1;" | sql

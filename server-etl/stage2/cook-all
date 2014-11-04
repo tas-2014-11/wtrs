@@ -1,0 +1,27 @@
+#!/bin/bash
+
+. .wtrs
+
+rotate etl/log
+
+# tiny,shared
+cook-function
+
+# tiny,shared
+cook-wtoidaliases
+
+# node,small,shared
+cook-node
+
+# storage,small,unshared
+cook-storage
+
+# latency,small,unshared
+cook-ip
+cook-service
+
+# big,unshared
+cook-interface
+
+# huge,shared
+cook-time

@@ -1,0 +1,11 @@
+#!/bin/bash
+# rrd_nodeid|rrd_oid|rrd_storagename|rrd_function|rrd_time|rrd_value
+
+. .wtrs
+
+in=${WTRS_SPOOL_RAW_CURRENT:?}/storage.txt
+out=${WTRS_SPOOL_COOKED:?}/storage_nk.txt
+
+log "$0: in=$in out=$out"
+
+cut -f3 -d'|' $in | sort -u > $out

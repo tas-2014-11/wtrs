@@ -1,0 +1,39 @@
+#!/bin/bash
+
+. .wtrs-client
+
+rotate client/log
+
+basename=fingerprint_info.txt
+filename=${WTRS_CLIENT_SPOOL:?}/${basename:?}
+
+export LD_LIBRARY_PATH=/WT/dbserver/lib
+psql_cmd='/WT/dbserver/bin/psql -t -q -A -h localhost -p 5432 -U watchtower watchtower'
+
+${psql_cmd:?} > ${filename:?} <<EOD
+SELECT nodeid,MIN(operating_system),MIN(ip_address),MIN(mac_address),MIN(nodelabel)
+FROM fingerprint_info
+FULL JOIN node
+USING (nodeid)
+GROUP BY nodeid
+ORDER BY nodeid;
+EOD
+
+log "${0##*/}: `/bin/ls -l ${filename:?}`"
+
+host=${WTRS_CLIENT_HTTPD_HOST:?}
+port=${WTRS_CLIENT_HTTPD_PORT:?}
+
+#create batchid directory
+path=/u/${WTRS_CLIENT_BATCHID:?}
+mkcol ${host:?} ${port:?} ${path:?}
+
+#create batchid/wtid directory
+path=${path:?}/${WTRS_CLIENT_WTID:?}
+mkcol ${host:?} ${port:?} ${path:?}
+
+path=${path:?}/${basename:?}
+
+log "${0##*/}: $filename http://$host:$port$path"
+
+put-file ${filename:?} ${host:?} ${port:?} ${path:?}

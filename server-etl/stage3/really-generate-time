@@ -1,0 +1,40 @@
+#!/usr/bin/perl
+
+use strict;
+use POSIX qw(strftime ceil);
+
+die("WTRS_SPOOL_COOKED is not set") unless defined($ENV{WTRS_SPOOL_COOKED});
+my $in_fn = $ENV{WTRS_SPOOL_COOKED} . "/time_nk.txt";
+my $out_fn = $ENV{WTRS_SPOOL_COOKED} . "/dimension_time.txt";
+
+open(my $in,"<$in_fn") || die($!);
+open(my $out,">$out_fn") || die($!);
+
+while(<$in>) {
+	chomp;
+	#my $now_string = strftime "%a %b %e %H:%M:%S %Y", localtime($_);
+	#print "$_ $now_string\n";
+
+	my $timestamp = $_;
+	my @when = localtime($timestamp);
+
+	my $year = strftime("%Y",@when);
+	my $month = strftime("%m",@when) + 0;
+	my $day = strftime("%d",@when) + 0;
+	my $hour = strftime("%H",@when) + 0;
+	my $minute = strftime("%M",@when) + 0;
+	my $second = strftime("%S",@when) + 0;
+	my $dayofyear = strftime("%j",@when) + 0;
+	my $dayofweek = strftime("%u",@when) + 0;
+	my $quarter = ceil($month / 4);
+	my $weekofyear = strftime("%U",@when) + 0;
+
+	# kettle's default date format is yyyy/MM/dd HH:MM:ss.SSS
+	my $datetime = "$year/$month/$day $hour:$minute:$second.0";
+
+	#print "UPDATE dimension_time SET year=$year,month=$month,day=$day,hour=$hour,minute=$minute,second=$second,dayofyear=$dayofyear,dayofweek=$dayofweek,quarter='$quarter',weekofyear=$weekofyear,datetime='$datetime' WHERE timestamp=$timestamp;\n";
+
+	print $out "$timestamp|$year|$month|$day|$hour|$minute|$second|$dayofyear|$dayofweek|$quarter|$weekofyear|$datetime\n";
+}
+
+close($out);

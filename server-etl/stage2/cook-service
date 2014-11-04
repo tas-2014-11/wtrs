@@ -1,0 +1,11 @@
+#!/bin/bash
+# rrd_ipaddress|rrd_service|rrd_function|rrd_time|rrd_value
+
+. .wtrs
+
+in=${WTRS_SPOOL_RAW_CURRENT:?}/latency.txt
+out=${WTRS_SPOOL_COOKED:?}/service_nk.txt
+
+log "$0: in=$in out=$out"
+
+cut -f2 -d'|' $in | sort -u > $out

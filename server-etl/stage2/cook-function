@@ -1,0 +1,12 @@
+#!/bin/bash
+
+. .wtrs
+
+log "$0"
+
+cat <<EOD > ${WTRS_SPOOL_COOKED:?}/function_nk.txt
+AVERAGE300
+AVERAGE3600
+MAX3600
+MIN3600
+EOD

@@ -1,0 +1,14 @@
+#!/bin/bash
+# in =  nodeid|operating_system|ip_address|mac_address
+# out = nodeid|operating_system|ip_address|mac_address|wtid
+
+. .wtrs
+
+in=${WTRS_SPOOL_RAW_CURRENT:?}/fingerprint_info.txt
+out=${WTRS_SPOOL_COOKED:?}/dimension_node.txt
+
+log "$0: in=$in out=$out"
+
+awk '{
+	print $0 "|" wtid
+}' wtid=${WTRS_CLIENT_WTID:?} < $in > $out

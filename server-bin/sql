@@ -1,0 +1,36 @@
+#!/bin/bash
+
+. .wtrs
+
+if [ -a .sql ]
+then . .sql
+fi
+
+database=${database:-wtrs}
+
+port=${port:-$WTRS_PGPORT}
+if [ -n "$port" ]
+then opt_port="-p $port"
+fi
+
+user=${user:-wtrs}
+if [ -n "$user" ]
+then opt_user="-U $user"
+fi
+
+host=${host:-wtrs_dbhost}
+if [ -n "$host" ]
+then opt_host="-h $host"
+fi
+
+if [ -z "$psql_opts" ]
+then psql_opts="-t -q -A"
+fi
+
+#echo "database=$database"
+#echo "port=$port"
+#echo "user=$user"
+#echo "host=$host"
+#echo "psql_opts=$psql_opts"
+
+exec psql $psql_opts $opt_host $opt_port $opt_user $database

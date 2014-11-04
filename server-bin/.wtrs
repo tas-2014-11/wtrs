@@ -1,0 +1,92 @@
+# .wtrs
+
+set -e
+
+# unset all environment variables except those starting with WTRS
+for i in `/bin/env|/bin/cut -d= -f1`
+do
+	if [ $i == WTRS${i##WTRS} ]
+	then
+		#echo "'$i' '${i##WTRS}'"
+		continue
+	fi
+	unset $i
+done
+unset i
+
+export WTRS=${WTRS:-/WTRS}
+
+export WTRS_SPOOL=${WTRS:?}/spool
+export WTRS_SPOOL_RAW=${WTRS_SPOOL:?}/raw
+
+export WTRS_PGDATA=${WTRS:?}/data
+export WTRS_PGPORT=5434
+
+postgres=${WTRS:?}/usr/postgresql-8.2.3
+
+# place /usr/bin last to avoid postgres and java installs
+export PATH
+PATH=${WTRS:?}/bin
+PATH=$PATH:${WTRS:?}/usr/jdk1.6.0_02/bin
+PATH=$PATH:${postgres:?}/bin
+PATH=$PATH:.
+PATH=$PATH:/usr/local/bin:/usr/local/sbin
+PATH=$PATH:/usr/bin:/bin:/usr/sbin:/sbin
+
+
+export LANG=C
+export LD_LIBRARY_PATH=$postgres/lib
+export TZ=PST8PDT
+
+unset postgres
+
+log() {
+	echo "`date +\"%Y%m%d.%H%M%S\"`: $*"
+}
+
+trap 'log "$0: failed"' ERR
+trap 'log "$0: exiting on SIGINT"'	SIGINT
+trap 'log "$0: exiting on SIGTERM"'	SIGTERM
+
+#log "$0 $*"
+
+rotate() {
+	local dir=${1:?}
+	local logfile=${WTRS:?}/$dir/${0##*/}.txt
+
+	if [ -s $logfile ]
+	then mv $logfile $logfile.`date +"%s"`
+	fi
+
+	exec 1>> $logfile
+
+	if [ $? -ne 0 ]
+	then
+		log "$0: error redirecting output to '$logfile'"
+		exit 1
+	fi
+
+	exec 2>&1
+}
+
+
+# if this file exists then we're in the middle of processing some client's upload.
+
+if [ -s ${WTRS_SPOOL:?}/.current ]
+then
+	. ${WTRS_SPOOL:?}/.current
+
+	export WTRS_CLIENT_BATCHID
+	export WTRS_CLIENT_WTID
+
+	batchid_wtid=${WTRS_CLIENT_BATCHID:?}/${WTRS_CLIENT_WTID:?}
+
+	export WTRS_SPOOL_RAW_CURRENT=${WTRS_SPOOL_RAW:?}/${batchid_wtid:?}
+	export WTRS_SPOOL_COOKED=${WTRS_SPOOL:?}/cooked/${batchid_wtid:?}
+	export WTRS_SPOOL_STEWED=${WTRS_SPOOL:?}/stewed/${batchid_wtid:?}
+	export WTRS_SPOOL_BURNED=${WTRS_SPOOL:?}/burned/${batchid_wtid:?}
+
+	unset batchid_wtid
+
+	mkdir -p ${WTRS_SPOOL_COOKED:?} ${WTRS_SPOOL_STEWED:?} ${WTRS_SPOOL_BURNED:?}
+fi

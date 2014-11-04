@@ -1,0 +1,182 @@
+#!/usr/bin/perl
+
+$out = STDOUT;
+$err = STDERR;
+
+sub do_log {
+	($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
+	$year += 1900;
+	++$mon;
+	print $err sprintf("%04d%02d%02d.%02d%02d%02d: @_\n",$year,$mon,$mday,$hour,$min,$sec);
+}
+
+# read the whole file at once.
+my $text = "";
+{
+	local $/;
+	$text = <>;
+	$text =~ s/[\s]+/ /g; # lose newlines and extra whitespace
+}
+
+# parse and remember all distinct oid+alias pairs.
+foreach(split(/[<>]+/,$text)) {
+	next unless(/MIBOBJ/i);
+
+	my $oid;
+	my $alias;
+	foreach(split(/[\s]+/)) {
+		my $name;
+
+		if(/OID=/i) {
+			($name,$oid) = split(/"/);
+		}
+
+		if(/ALIAS=/i) {
+			($name,$alias) = split(/"/);
+		}
+	}
+
+	#if the oid starts with a digit prepend a dot
+	if($oid =~ /^[\d]/) {
+		$oid = "." . $oid;
+	}
+
+	$line = "$oid $alias";
+
+	$lines{$line} = $line;
+
+	++$n_entries;
+}
+
+do_log "read $n_entries entries";
+
+
+# now for each alias build the list of oids that belong to it
+foreach (sort (keys %lines)) {
+	($oid,$alias) = split;
+
+	my $separator = " " if(length($alias2oid{$alias}));
+	$alias2oid{$alias} .= "$separator$oid";
+	#print $err "$alias2oid{$alias}\n";
+}
+
+
+# next examine each alias.  if it has multiple oids discard one.
+
+foreach $alias (sort (keys %alias2oid)) {
+	++$n_aliases;
+
+	$oidlist = $alias2oid{$alias};
+
+	@a = split(/ /,$oidlist);
+
+	if($#a > 0) {
+		# more than one oid maps onto this alias.
+
+		++$n_collisions;
+
+		# for 9600 vs 311 collisions discard the 311.
+
+		my $oid_williams;
+		my $oid_microsoft;
+
+		foreach(@a) {
+			$oid_williams  = $_ if(/.1.3.6.1.4.1.9600/);
+			$oid_microsoft = $_ if(/.1.3.6.1.4.1.311/);
+		}
+
+		# toss the microsoft one. keep the williams one.
+
+		if(length($oid_williams)) {
+			print $out "$oid_williams|$alias\n";
+			next;
+		}
+
+		if(length($oid_microsoft)) {
+			print $out "$oid_microsoft|$alias\n";
+			next;
+		}
+
+
+		# there's another collision on hrSystemNumUsers.
+
+		my $oid_host;
+		my $oid_lanman;
+
+		foreach(@a) {
+			$oid_host   = $_ if(/.1.3.6.1.2.1.25/);
+			$oid_lanman = $_ if(/.1.3.6.1.4.1.77/);
+		}
+
+		# keep the mib-2 one.  lose the lanman one.
+
+		if(length($oid_host)) {
+			print $out "$oid_host|$alias\n";
+			next;
+		}
+
+		if(length($oid_lanman)) {
+			print $out "$oid_lanman|$alias\n";
+			next;
+		}
+
+
+		# another collision on cpuUtilization. checkpoint vs bluecoat.
+		# keep checkpoint .1.3.6.1.4.1.94.1.21.1.7.1
+		# discard bluecoat .1.3.6.1.4.1.3417.2.4.1.1.1.4
+
+		my $oid_checkpoint;
+		my $oid_bluecoat;
+
+		foreach(@a) {
+			$oid_checkpoint = $_ if(/.1.3.6.1.4.1.94.1.21.1.7.1/);
+			$oid_bluecoat   = $_ if(/.1.3.6.1.4.1.3417.2.4.1.1.1.4/);
+		}
+
+		# retain checkpoint in favor of bluecoat.
+
+		if(length($oid_checkpoint)) {
+			print $out "$oid_checkpoint|$alias\n";
+			next;
+		}
+
+		if(length($oid_bluecoat)) {
+			print $out "$oid_bluecoat|$alias\n";
+			next;
+		}
+
+
+		# avoid 3.3 vs 4.4 errors in ups-mib
+
+		my $oid_reallyoutamp;
+		my $oid_notreallyoutamp;
+
+		foreach(@a) {
+			$oid_reallyout =    $_ if(/.1.3.6.1.2.1.33.1.4.4/);
+			$oid_notreallyout = $_ if(/.1.3.6.1.2.1.33.1.3.3/);
+		}
+
+		if(length($oid_reallyout)) {
+			print $out "$oid_reallyout|$alias\n";
+			next;
+		}
+
+		if(length($oid_notreallyout)) {
+			print $out "$oid_notreallyout|$alias\n";
+			next;
+		}
+
+
+		do_log "unexpected data collision: alias=$alias oidlist=$oidlist";
+
+		# don't know what to do with the data.  give up and yell for help.
+		exit 1;
+	}
+
+	# there must be only one oid for this alias
+
+	print $out "$oidlist|$alias\n";
+}
+
+do_log "found $n_aliases aliases";
+do_log "resolved $n_collisions collisions";

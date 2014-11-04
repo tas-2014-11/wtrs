@@ -1,0 +1,34 @@
+#!/bin/bash
+
+. .wtrs-client
+
+rotate client/log
+
+host=${WTRS_CLIENT_HTTPD_HOST:?}
+port=${WTRS_CLIENT_HTTPD_PORT:?}
+
+do_put_file() {
+	log "${0##*/}: `/bin/ls -l ${spool:?}`"
+	path=/u/${WTRS_CLIENT_BATCHID:?}/${WTRS_CLIENT_WTID:?}/${file:?}
+
+	log "${0##*/}: $spool http://$host:$port$path"
+	put-file ${spool:?} ${host:?} ${port:?} ${path:?}
+}
+
+file=interface_metadata.txt
+spool=${WTRS_CLIENT_SPOOL:?}/${file:?}
+
+fetch-interface-metadata > ${spool:?}
+log "${0##*/}: `/bin/ls -l ${spool:?}`"
+
+fetch-interface-metadata-stealthed >> ${spool:?}
+
+do_put_file
+
+
+file=candidate_snmpprimaries.txt
+spool=${WTRS_CLIENT_SPOOL:?}/${file:?}
+
+fetch-candidate-snmpprimaries > ${spool:?}
+
+do_put_file

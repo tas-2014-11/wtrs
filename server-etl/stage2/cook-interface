@@ -1,0 +1,38 @@
+#!/bin/bash
+# rrd_nodeid|rrd_oid|rrd_interface|rrd_function|rrd_time|rrd_value
+
+. .wtrs
+
+rotate etl/log
+
+
+in=${WTRS_SPOOL_RAW_CURRENT:?}/interface.txt
+out=${WTRS_SPOOL_COOKED:?}/interface_rrd_nk.txt
+
+log "${0##*/}: in=${in:?} out=${out:?}"
+
+#cook natural keys (nodeid,iflabel) from raw interface facts
+cut -f1,3 -d'|' ${in:?} | sort -u | sort -n > $out
+
+log "${0##*/}: `wc ${out:?}`"
+
+
+out=${WTRS_SPOOL_COOKED:?}/interface_dim_nk.txt
+log "${0##*/}: out=${out:?}"
+
+#extract natural keys which have been previously loaded.
+#this seems wrong, but trust me, we're gonna need it.
+
+sql > $out <<EOD
+SELECT node_nodeid,if_label
+FROM dimension_interface
+WHERE node_wtid = ${WTRS_CLIENT_WTID:?};
+EOD
+
+log "${0##*/}: `wc ${out:?}`"
+
+
+#take all that stuff we just spooled up and chew on it some more.
+#in the end we produce something suitable to load dimension_interface
+
+really-cook-interface

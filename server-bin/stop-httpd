@@ -1,0 +1,5 @@
+#!/bin/bash
+export PATH=/bin:/usr/bin
+export LD_LIBRARY_PATH=
+cd /WTRS/usr/apache-1.3.37
+/WTRS/usr/apache-1.3.37/bin/apachectl stop

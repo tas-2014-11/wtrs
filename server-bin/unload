@@ -1,0 +1,2 @@
+#!/bin/bash
+echo "SELECT * FROM $1 ORDER BY 1,2;" | sql > $1.txt

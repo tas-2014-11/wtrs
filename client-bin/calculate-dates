@@ -1,0 +1,68 @@
+#!/bin/bash
+#here we establish some policy around the date ranges clients load
+
+set -e
+
+. .wtrs-client
+
+rotate client/log
+
+log_contents_if_exist() {
+	local filename=$1
+
+	if [ -s ${filename:?} ]
+	then log "${filename:?} contains `cat ${filename:?}`"
+	else log "${filename:?} does not exist"
+	fi
+}
+
+log_min_and_max() {
+	log_contents_if_exist ${WTRS_CLIENT_SPOOL_MINFILE:?}
+	log_contents_if_exist ${WTRS_CLIENT_SPOOL_MAXFILE:?}
+}
+
+# check the archived .batchid files to find the max time of the most
+# recent successful load.
+
+# loop through all.  the last will be the max.
+for batchid_file in ${WTRS_CLIENT_SPOOL_BATCHID:?}.*
+do :
+done
+
+# no archived batchid files.  this must the first time through.
+if [ ! -s ${batchid_file:?} ]
+then
+	log "no archived batchid files found via ${batchid_file:?}"
+	log "setting min=0.  removing max."
+
+	# 0 min means start at beginning of time.
+	# unspecified max causes rrdreader to choose last midnight.
+
+	echo 0 > ${WTRS_CLIENT_SPOOL_MINFILE:?}
+	rm -f ${WTRS_CLIENT_SPOOL_MAXFILE:?}
+
+	log_min_and_max
+
+	exit 0
+fi
+
+# found an archived batchid file.
+# extract from it min and max of last successful load.
+
+log "`/bin/ls -l ${batchid_file:?}`"
+
+batchid=`cat ${batchid_file:?}`
+min=${batchid%%\.*}
+max=${batchid##*\.}
+
+log "extracted min=${min:?} max=${max:?} from batchid=${batchid:?} in ${batchid_file:?}"
+
+# set min of next run to max of previous run.
+# remove max to force rrdreader to choose last midnight.
+
+log "setting min=$max. removing max."
+
+echo $max > ${WTRS_CLIENT_SPOOL_MINFILE:?}
+rm -f ${WTRS_CLIENT_SPOOL_MAXFILE:?}
+
+log_min_and_max

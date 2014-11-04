@@ -1,0 +1,12 @@
+#!/bin/bash
+
+. .wtrs
+
+rotate db/log
+
+env
+echo
+
+#http://www.postgresql.org/docs/8.2/static/app-initdb.html
+
+initdb --pgdata=${WTRS_PGDATA:?} --encoding=UTF8 --username=wtrs --pwfile=${WTRS:?}/db/install/pwfile.txt

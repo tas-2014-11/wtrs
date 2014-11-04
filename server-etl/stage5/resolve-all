@@ -1,0 +1,15 @@
+#!/bin/bash
+
+. .wtrs
+
+rotate etl/log
+
+log "START $0"
+
+for i in latency storage node interface
+do
+	log "GO $i"
+	really-resolve-fact-table-sk $i
+done
+
+log "END $0"

@@ -1,0 +1,74 @@
+#!/bin/bash
+
+. .wtrs
+
+rotate etl/log
+
+batchid=
+wtid=
+
+# grab the first directory of the form $WTRS_SPOOL_RAW/([\d]+\.[\d]+)/([\d]+)
+# where $1 = batchid and $2 = wtid
+
+for batchid_dir in ${WTRS_SPOOL_RAW:?}/[0-9]*
+do
+	if [ ! -d ${batchid_dir:?} ]
+	then
+		log "'$batchid_dir' is not a directory"
+		continue
+	fi
+
+	batchid=${batchid_dir##*/}
+
+	for wtid_dir in ${batchid_dir:?}/[0-9]*
+	do
+		if [ ! -d ${wtid_dir:?} ]
+		then
+			log "'$wtid_dir' is not a directory"
+			continue
+		fi
+
+		wtid=${wtid_dir##*/}
+
+		log "wtid=$wtid batchid=$batchid"
+
+		# found one.  let's go process it.
+		break
+	done
+
+	if [ -n "$wtid" ]
+	then
+		# we got one.  otherwise keep looking.
+		break
+	fi
+done
+
+if [ -z "$batchid" ]
+then
+	log "no batchid found in '${WTRS_SPOOL_RAW:?}'"
+	exit 0
+fi
+
+if [ -z "$wtid" ]
+then
+	log "no wtid found in '${WTRS_SPOOL_RAW:?}' (batchid=$batchid)"
+	exit 0
+fi
+
+# the file $WTRS_SPOOL/.current contains the wtid and batchid currently being processed.
+# if it exists it means that a job is currently running (or one crashed hard).
+# do not overwrite.
+
+current_file=${WTRS_SPOOL:?}/.current
+
+if [ -s $current_file ]
+then
+	log "'$current_file' already exists with contents '`cat $current_file`'"
+	log "This means that a job is already running (or one crashed hard)."
+	exit 1
+fi
+
+cat > $current_file <<EOD
+WTRS_CLIENT_BATCHID=${batchid:?}
+WTRS_CLIENT_WTID=${wtid:?}
+EOD

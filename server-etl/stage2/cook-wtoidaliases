@@ -1,0 +1,8 @@
+#!/bin/bash
+
+. .wtrs
+
+in=${WTRS_SPOOL_RAW_CURRENT:?}/datacollection-config.xml
+out=${WTRS_SPOOL_COOKED:?}/wt_oid_aliases.txt;
+
+really-cook-wtoidaliases < ${in:?} | sort > ${out:?}

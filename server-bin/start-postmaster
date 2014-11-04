@@ -1,0 +1,9 @@
+#!/bin/bash
+
+. .wtrs
+
+rotate db/log
+
+cd ${WTRS_PGDATA:?}
+
+setsid postmaster -D ${WTRS_PGDATA:?} -p ${WTRS_PGPORT:?} -h '*' &

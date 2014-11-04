@@ -1,0 +1,289 @@
+#!/bin/bash
+
+. .wtrs
+
+rotate db/log
+
+sk_type=INTEGER
+fk_type=INTEGER
+
+value_type=FLOAT4
+
+ip_type="VARCHAR(15)"
+mac_type="VARCHAR(17)"
+
+ip_raw_type=BIGINT
+
+exec sql <<EOD
+	CREATE TABLE dimension_time (
+		timestamp	INTEGER,
+
+		year		SMALLINT,
+		month		SMALLINT,
+		day		SMALLINT,
+		hour		SMALLINT,
+		minute		SMALLINT,
+		second		SMALLINT,
+		dayofyear	SMALLINT,
+		dayofweek	SMALLINT,
+		quarter		SMALLINT,
+		weekofyear	SMALLINT,
+		datetime	TIMESTAMP,
+
+		PRIMARY KEY (timestamp)
+	) WITH(FILLFACTOR=100);
+
+	CREATE INDEX dimension_time_index_ymd	ON dimension_time(year,month,day);
+	CREATE INDEX dimension_time_index_hms	ON dimension_time(hour,minute,second);
+	CREATE INDEX dimension_time_index_dayofyear	ON dimension_time(dayofyear);
+	CREATE INDEX dimension_time_index_dayofweek	ON dimension_time(dayofweek);
+	CREATE INDEX dimension_time_index_quarter	ON dimension_time(quarter);
+	CREATE INDEX dimension_time_index_weekofyear	ON dimension_time(weekofyear);
+	CREATE INDEX dimension_time_index_datetime	ON dimension_time(datetime);
+
+
+	CREATE TABLE dimension_function (
+		function_sk	$sk_type,
+		function	VARCHAR(16),
+
+		version		INTEGER,
+		date_from	TIMESTAMP,
+		date_to		TIMESTAMP,
+
+		PRIMARY KEY (function_sk)
+	) WITH(FILLFACTOR=100);
+
+	CREATE INDEX dimension_function_index_function	ON dimension_function(function);
+
+
+	CREATE TABLE dimension_node (
+		node_sk		$sk_type,
+		nodeid		INTEGER,
+		os		VARCHAR(128),
+		ip		$ip_type,
+		ip_raw		$ip_raw_type,
+		mac		$mac_type,
+		wtid		INTEGER,
+		nodelabel	VARCHAR(256),
+
+		version		INTEGER,
+		date_from	TIMESTAMP,
+		date_to		TIMESTAMP,
+
+		PRIMARY KEY (node_sk)
+	) WITH(FILLFACTOR=100);
+
+	CREATE INDEX dimension_node_index_nodeid	ON dimension_node(nodeid);
+	CREATE INDEX dimension_node_index_os		ON dimension_node(os);
+	CREATE INDEX dimension_node_index_ip		ON dimension_node(ip);
+	CREATE INDEX dimension_node_index_ip_raw	ON dimension_node(ip_raw);
+	CREATE INDEX dimension_node_index_mac		ON dimension_node(mac);
+	CREATE INDEX dimension_node_index_wtid		ON dimension_node(wtid);
+	CREATE INDEX dimension_node_index_nodelabel	ON dimension_node(nodelabel);
+
+	CREATE TABLE dimension_oid (
+		oid_sk		$sk_type,
+		oid_wt_alias	VARCHAR(64),
+		oid_oid		VARCHAR(256),
+		oid_alias	VARCHAR(64),
+		oid_descr	VARCHAR(256),
+
+		version		INTEGER,
+		date_from	TIMESTAMP,
+		date_to		TIMESTAMP,
+
+		PRIMARY KEY (oid_sk)
+	) WITH(FILLFACTOR=100);
+
+	CREATE INDEX dimension_oid_index_oid_wt_alias	ON dimension_oid(oid_wt_alias);
+	CREATE INDEX dimension_oid_index_oid_oid	ON dimension_oid(oid_oid);
+
+	CREATE TABLE fact_node (
+		node_sk		$fk_type,
+		oid_sk		$fk_type,
+		function_sk	$fk_type,
+		timestamp	INTEGER,
+
+		value		$value_type,
+
+		PRIMARY KEY (node_sk,oid_sk,function_sk,timestamp),
+
+		FOREIGN KEY (node_sk)	REFERENCES dimension_node(node_sk),
+		FOREIGN KEY (oid_sk)	REFERENCES dimension_oid(oid_sk),
+		FOREIGN KEY (function_sk)	REFERENCES dimension_function(function_sk),
+		FOREIGN KEY (timestamp)	REFERENCES dimension_time(timestamp)
+	) WITH(FILLFACTOR=100);
+
+	CREATE INDEX fact_node_index_node_sk		ON fact_node(node_sk);
+	CREATE INDEX fact_node_index_oid_sk		ON fact_node(oid_sk);
+	CREATE INDEX fact_node_index_function_sk	ON fact_node(function_sk);
+	CREATE INDEX fact_node_index_timestamp		ON fact_node(timestamp);
+
+
+
+	CREATE TABLE dimension_ip (
+		ip_sk		$sk_type,
+		ip		$ip_type,
+		ip_raw		$ip_raw_type,
+		wtid		INTEGER,
+
+		version		INTEGER,
+		date_from	TIMESTAMP,
+		date_to		TIMESTAMP,
+
+		PRIMARY KEY (ip_sk)
+	) WITH(FILLFACTOR=100);
+
+	CREATE INDEX dimension_ip_index_ip	ON dimension_ip(ip);
+	CREATE INDEX dimension_ip_index_ip_raw	ON dimension_ip(ip_raw);
+	CREATE INDEX dimension_ip_index_wtid	ON dimension_ip(wtid);
+
+	CREATE TABLE dimension_service (
+		service_sk	$sk_type,
+		service		VARCHAR(32),
+
+		version		INTEGER,
+		date_from	TIMESTAMP,
+		date_to		TIMESTAMP,
+
+		PRIMARY KEY (service_sk)
+	) WITH(FILLFACTOR=100);
+
+	CREATE INDEX dimension_service_index_service	ON dimension_service(service);
+
+	CREATE TABLE fact_latency (
+		ip_sk		$sk_type,
+		service_sk	$fk_type,
+		function_sk	$fk_type,
+		timestamp	INTEGER,
+
+		value		$value_type,
+
+		PRIMARY KEY (ip_sk,service_sk,function_sk,timestamp),
+
+		FOREIGN KEY (ip_sk)		REFERENCES dimension_ip(ip_sk),
+		FOREIGN KEY (service_sk)	REFERENCES dimension_service(service_sk),
+		FOREIGN KEY (function_sk)	REFERENCES dimension_function(function_sk),
+		FOREIGN KEY (timestamp)		REFERENCES dimension_time(timestamp)
+	) WITH(FILLFACTOR=100);
+
+	CREATE INDEX fact_latency_index_ip_sk		ON fact_latency(ip_sk);
+	CREATE INDEX fact_latency_index_service_sk	ON fact_latency(service_sk);
+	CREATE INDEX fact_latency_index_function_sk	ON fact_latency(function_sk);
+	CREATE INDEX fact_latency_index_timestamp	ON fact_latency(timestamp);
+
+
+
+	CREATE TABLE dimension_storage (
+		storage_sk	$sk_type,
+		name		VARCHAR(128),
+
+		version		INTEGER,
+		date_from	TIMESTAMP,
+		date_to		TIMESTAMP,
+
+		PRIMARY KEY (storage_sk)
+	) WITH(FILLFACTOR=100);
+
+	CREATE INDEX dimension_storage_index_name	ON dimension_storage(name);
+
+	CREATE TABLE fact_storage (
+		node_sk		$fk_type,
+		storage_sk	$fk_type,
+		oid_sk		$fk_type,
+		function_sk	$fk_type,
+		timestamp	INTEGER,
+
+		value		$value_type,
+
+		PRIMARY KEY (node_sk,storage_sk,oid_sk,function_sk,timestamp),
+
+		FOREIGN KEY (node_sk)		REFERENCES dimension_node(node_sk),
+		FOREIGN KEY (storage_sk)	REFERENCES dimension_storage(storage_sk),
+		FOREIGN KEY (oid_sk)		REFERENCES dimension_oid(oid_sk),
+		FOREIGN KEY (function_sk)	REFERENCES dimension_function(function_sk),
+		FOREIGN KEY (timestamp)		REFERENCES dimension_time(timestamp)
+	) WITH(FILLFACTOR=100);
+
+	CREATE INDEX fact_storage_index_node_sk		ON fact_storage(node_sk);
+	CREATE INDEX fact_storage_index_storage_sk	ON fact_storage(storage_sk);
+	CREATE INDEX fact_storage_index_oid_sk		ON fact_storage(oid_sk);
+	CREATE INDEX fact_storage_index_function_sk	ON fact_storage(function_sk);
+	CREATE INDEX fact_storage_index_timestamp	ON fact_storage(timestamp);
+
+
+
+	CREATE TABLE dimension_interface (
+		interface_sk	$sk_type,
+
+		node_wtid	INTEGER,
+		node_nodeid	INTEGER,
+		node_ip		$ip_type,
+		node_ip_raw	$ip_raw_type,
+		node_netmask	$ip_type,
+		node_netmask_width	SMALLINT,
+		node_mac	$mac_type,
+		node_mac_raw	BIGINT,
+		node_os		VARCHAR(128),
+		node_label	VARCHAR(256),
+
+		if_index	INTEGER,
+		if_type		INTEGER,
+		if_type_text	VARCHAR(36),
+		if_ip		$ip_type,
+		if_ip_raw	$ip_raw_type,
+		if_netmask	$ip_type,
+		if_netmask_width	SMALLINT,
+		if_mac		$mac_type,
+		if_mac_raw	BIGINT,
+		if_speed	BIGINT,
+		if_name		VARCHAR(32),
+		if_descr	VARCHAR(256),
+		if_alias	VARCHAR(256),
+
+		if_hostname	VARCHAR(256),
+		if_label	VARCHAR(256),
+		if_snmpprimary	VARCHAR(1),
+
+		version		INTEGER,
+		date_from	TIMESTAMP,
+		date_to		TIMESTAMP,
+
+		PRIMARY KEY (interface_sk)
+	) WITH(FILLFACTOR=100);
+
+	-- desired natural key. no unique constraint because scd.
+	CREATE INDEX dimension_interface_index_wtid_nodeid_ifindex
+			ON dimension_interface(node_wtid,node_nodeid,if_index);
+
+	-- effective natural key. no unique constraint because scd.
+	CREATE INDEX dimension_interface_index_if_label
+			ON dimension_interface(if_label);
+
+	-- FIXME: more indexes !
+
+
+
+	CREATE TABLE fact_interface (
+		interface_sk	$fk_type,
+		oid_sk		$fk_type,
+		function_sk	$fk_type,
+		timestamp	INTEGER,
+
+		value		$value_type,
+
+		PRIMARY KEY (interface_sk,oid_sk,function_sk,timestamp),
+
+		FOREIGN KEY (interface_sk)	REFERENCES dimension_interface(interface_sk),
+		FOREIGN KEY (oid_sk)		REFERENCES dimension_oid(oid_sk),
+		FOREIGN KEY (function_sk)	REFERENCES dimension_function(function_sk),
+		FOREIGN KEY (timestamp)		REFERENCES dimension_time(timestamp)
+	) WITH(FILLFACTOR=100);
+
+	CREATE INDEX fact_interface_index_interface_sk	ON fact_interface(interface_sk);
+	CREATE INDEX fact_interface_index_oid_sk	ON fact_interface(oid_sk);
+	CREATE INDEX fact_interface_index_function_sk	ON fact_interface(function_sk);
+	CREATE INDEX fact_interface_index_timestamp	ON fact_interface(timestamp);
+
+
+EOD

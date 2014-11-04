@@ -1,0 +1,8 @@
+#!/bin/bash
+
+. .wtrs
+
+exec 1>> ${WTRS:?}/db/log/${0##*/}.txt
+exec 2>&1
+
+pg_ctl stop -D ${WTRS_PGDATA:?} -m fast

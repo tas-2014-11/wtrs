@@ -1,0 +1,5 @@
+#!/bin/bash
+
+. .wtrs
+
+really-generate-time

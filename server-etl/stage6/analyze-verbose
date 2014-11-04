@@ -1,0 +1,13 @@
+#!/bin/bash
+
+. .wtrs
+
+rotate etl/log
+
+main() {
+	echo "$0: START"
+	echo "ANALYZE VERBOSE;" | sql
+	echo "$0: END"
+}
+
+main 2>&1 | timestamper

@@ -1,0 +1,91 @@
+#!/bin/bash
+
+. .wtrs
+
+rotate etl/log
+
+cooked=${WTRS_SPOOL_COOKED:?}
+
+export WTRS_JAVA_OPTS
+
+dimension_interface() {
+	WTRS_JAVA_OPTS="-Dwtrs.interface.infile.cooked=$cooked/dimension_interface_preload.txt"
+	do-pan-2.5.0 -file=load-dimension-interface.ktr
+}
+
+dimension_function() {
+	WTRS_JAVA_OPTS="-Dwtrs.function.infile.cooked=$cooked/function_nk.txt"
+	do-pan -file=load-dimension-function.ktr
+}
+
+dimension_service() {
+	WTRS_JAVA_OPTS="-Dwtrs.service.infile.cooked=$cooked/service_nk.txt"
+	do-pan -file=load-dimension-service.ktr
+}
+
+dimension_ip() {
+	WTRS_JAVA_OPTS="-Dwtrs.ip.infile.cooked=$cooked/dimension_ip.txt"
+	do-pan -file=load-dimension-ip.ktr
+}
+
+dimension_node() {
+	WTRS_JAVA_OPTS="-Dwtrs.node.infile.cooked=$cooked/dimension_node.txt"
+	do-pan-2.5.0 -file=load-dimension-node.ktr
+}
+
+dimension_storage() {
+	WTRS_JAVA_OPTS="-Dwtrs.storage.infile.cooked=$cooked/storage_nk.txt"
+	do-pan -file=load-dimension-storage.ktr
+}
+
+dimension_oid() {
+	WTRS_JAVA_OPTS="-Dwtrs.oid.infile.cooked=$cooked/wt_oid_aliases.txt"
+	do-pan -file=load-dimension-oid.ktr
+}
+
+dimension_time() {
+	generate-time
+
+	WTRS_JAVA_OPTS="-Dwtrs.time.infile.cooked=$cooked/dimension_time.txt"
+	do-pan -file=load-dimension-time.ktr
+}
+
+checkpoint() {
+	echo "CHECKPOINT;" | sql
+}
+
+go() {
+	log "go($1) BEFORE count=`count $1`"
+	$1
+	log "go($1) AFTER  count=`count $1`"
+
+	sleep 1
+
+	log "checkpoint start"
+	checkpoint
+	log "checkpoint end"
+}
+
+main() {
+	go dimension_function
+	go dimension_service
+	go dimension_ip
+	go dimension_time
+
+	go dimension_node
+	go dimension_storage
+	go dimension_oid
+
+	go dimension_interface
+}
+
+log "START $0 $*"
+
+if [ -n "$1" ]
+then
+	go $1
+else
+	main
+fi
+
+log "END $0 $*"

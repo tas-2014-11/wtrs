@@ -1,0 +1,15 @@
+#!/bin/bash
+#this is how we tell the server we're all done uploading
+
+. .wtrs-client
+
+rotate client/log
+
+filename=${WTRS_CLIENT_SPOOL_BATCHID:?}
+host=${WTRS_CLIENT_HTTPD_HOST:?}
+port=${WTRS_CLIENT_HTTPD_PORT:?}
+path=/u/${WTRS_CLIENT_BATCHID:?}/${WTRS_CLIENT_WTID:?}/batchid.txt
+
+log "$0: $filename http://$host:$port$path"
+
+put-file $filename $host $port $path

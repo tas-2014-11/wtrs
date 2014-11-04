@@ -1,0 +1,7 @@
+<project name="tas-incremental" default="incremental">
+	<target name="incremental">
+		<ant dir="../../../../../" target="incremental">
+			<property name="dir.incremental" value="src/com/cittio/wtrs/rrdreader"/>
+		</ant>
+	</target>
+</project>

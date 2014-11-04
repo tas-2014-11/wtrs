@@ -1,0 +1,13 @@
+#!/bin/bash
+
+. .wtrs
+
+rotate db/log
+
+psql -p ${WTRS_PGPORT:?} -U wtrs template1 <<EOD
+	\l
+
+	CREATE DATABASE wtrs;
+
+	\l
+EOD

@@ -1,0 +1,49 @@
+#!/bin/bash
+
+trap 'echo "$0: failed"' ERR
+
+set -e
+
+cd /WTRS/etl
+export PATH=/WTRS/bin:.:$PATH
+
+cd stage1
+discover-spooled-client-info
+cd ..
+
+cd stage2
+cook-all
+cd ..
+
+cd stage3
+load-all-dimensions
+
+l="
+dimension_function
+dimension_service
+dimension_ip
+dimension_time
+dimension_node
+dimension_storage
+dimension_oid
+dimension_interface
+"
+l=""
+
+for i in $l
+do load-all-dimensions $i
+done
+
+cd ..
+
+cd stage4
+unload-all-dimensions
+cd ..
+
+cd stage5
+resolve-all
+cd ..
+
+cd stage6
+load-all-fact-tables
+cd ..
